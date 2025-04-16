@@ -73,6 +73,31 @@ const ExpireArgumentsSchema = z.object({
     seconds: z.number(),
 });
 
+// 添加列表操作相关的 Schema 定义
+const LPushArgumentsSchema = z.object({
+    key: z.string(),
+    value: z.string().or(z.array(z.string())),
+});
+
+const RPushArgumentsSchema = z.object({
+    key: z.string(),
+    value: z.string().or(z.array(z.string())),
+});
+
+const LPopArgumentsSchema = z.object({
+    key: z.string(),
+});
+
+const RPopArgumentsSchema = z.object({
+    key: z.string(),
+});
+
+const LRangeArgumentsSchema = z.object({
+    key: z.string(),
+    start: z.number(),
+    stop: z.number(),
+});
+
 // Create server instance
 const server = new Server(
     {
@@ -241,6 +266,99 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                         },
                     },
                     required: ["key", "seconds"],
+                },
+            },
+            // 添加列表操作相关的工具定义
+            {
+                name: "lpush",
+                description: "Insert one or multiple values at the beginning of a list",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        key: {
+                            type: "string",
+                            description: "Redis list key",
+                        },
+                        value: {
+                            oneOf: [
+                                { type: "string" },
+                                { type: "array", items: { type: "string" } }
+                            ],
+                            description: "Value or array of values to push to the list",
+                        },
+                    },
+                    required: ["key", "value"],
+                },
+            },
+            {
+                name: "rpush",
+                description: "Insert one or multiple values at the end of a list",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        key: {
+                            type: "string",
+                            description: "Redis list key",
+                        },
+                        value: {
+                            oneOf: [
+                                { type: "string" },
+                                { type: "array", items: { type: "string" } }
+                            ],
+                            description: "Value or array of values to push to the list",
+                        },
+                    },
+                    required: ["key", "value"],
+                },
+            },
+            {
+                name: "lpop",
+                description: "Remove and get the first element in a list",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        key: {
+                            type: "string",
+                            description: "Redis list key",
+                        },
+                    },
+                    required: ["key"],
+                },
+            },
+            {
+                name: "rpop",
+                description: "Remove and get the last element in a list",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        key: {
+                            type: "string",
+                            description: "Redis list key",
+                        },
+                    },
+                    required: ["key"],
+                },
+            },
+            {
+                name: "lrange",
+                description: "Get a range of elements from a list",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        key: {
+                            type: "string",
+                            description: "Redis list key",
+                        },
+                        start: {
+                            type: "number",
+                            description: "Start index (0-based)",
+                        },
+                        stop: {
+                            type: "number",
+                            description: "Stop index (inclusive)",
+                        },
+                    },
+                    required: ["key", "start", "stop"],
                 },
             },
         ],
@@ -429,6 +547,113 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     ],
                 };
             }
+        } 
+        // 实现列表操作相关命令
+        else if (name === "lpush") {
+            const { key, value } = LPushArgumentsSchema.parse(args);
+            let result;
+        
+            if (Array.isArray(value)) {
+                result = await redisClient.lPush(key, value);
+            } else {
+                result = await redisClient.lPush(key, value);
+            }
+        
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `成功添加到列表开头，新长度: ${result}`,
+                    },
+                ],
+            };
+        } else if (name === "rpush") {
+            const { key, value } = RPushArgumentsSchema.parse(args);
+            let result;
+        
+            if (Array.isArray(value)) {
+                result = await redisClient.rPush(key, value);
+            } else {
+                result = await redisClient.rPush(key, value);
+            }
+        
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `成功添加到列表末尾，新长度: ${result}`,
+                    },
+                ],
+            };
+        } else if (name === "lpop") {
+            const { key } = LPopArgumentsSchema.parse(args);
+            const result = await redisClient.lPop(key);
+        
+            if (result === null) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `列表为空或不存在: ${key}`,
+                        },
+                    ],
+                };
+            }
+        
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: result,
+                    },
+                ],
+            };
+        } else if (name === "rpop") {
+            const { key } = RPopArgumentsSchema.parse(args);
+            const result = await redisClient.rPop(key);
+        
+            if (result === null) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `列表为空或不存在: ${key}`,
+                        },
+                    ],
+                };
+            }
+        
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: result,
+                    },
+                ],
+            };
+        } else if (name === "lrange") {
+            const { key, start, stop } = LRangeArgumentsSchema.parse(args);
+            const result = await redisClient.lRange(key, start, stop);
+        
+            if (result.length === 0) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `指定范围内没有元素或列表不存在: ${key}`,
+                        },
+                    ],
+                };
+            }
+        
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: result.join('\n'),
+                    },
+                ],
+            };
         } else {
             throw new Error(`Unknown tool: ${name}`);
         }
