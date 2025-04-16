@@ -145,6 +145,30 @@ const PubSubChannelsArgumentsSchema = z.object({
     pattern: z.string().optional(),
 });
 
+// 添加 Set 相关的 Schema 定义
+const SAddArgumentsSchema = z.object({
+    key: z.string(),
+    member: z.string().or(z.array(z.string())),
+});
+
+const SMembersArgumentsSchema = z.object({
+    key: z.string(),
+});
+
+const SIsMemberArgumentsSchema = z.object({
+    key: z.string(),
+    member: z.string(),
+});
+
+const SRemArgumentsSchema = z.object({
+    key: z.string(),
+    member: z.string().or(z.array(z.string())),
+});
+
+const SCardArgumentsSchema = z.object({
+    key: z.string(),
+});
+
 // Create server instance
 const server = new Server(
     {
@@ -502,6 +526,95 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                             description: "Pattern to filter channels (optional)",
                         },
                     },
+                },
+            },
+            // 添加 Set 相关工具定义
+            {
+                name: "sadd",
+                description: "Add one or more members to a set",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        key: {
+                            type: "string",
+                            description: "Redis set key",
+                        },
+                        member: {
+                            oneOf: [
+                                { type: "string" },
+                                { type: "array", items: { type: "string" } }
+                            ],
+                            description: "Member or array of members to add to the set",
+                        },
+                    },
+                    required: ["key", "member"],
+                },
+            },
+            {
+                name: "smembers",
+                description: "Get all members in a set",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        key: {
+                            type: "string",
+                            description: "Redis set key",
+                        },
+                    },
+                    required: ["key"],
+                },
+            },
+            {
+                name: "sismember",
+                description: "Determine if a member is in a set",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        key: {
+                            type: "string",
+                            description: "Redis set key",
+                        },
+                        member: {
+                            type: "string",
+                            description: "Member to check",
+                        },
+                    },
+                    required: ["key", "member"],
+                },
+            },
+            {
+                name: "srem",
+                description: "Remove one or more members from a set",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        key: {
+                            type: "string",
+                            description: "Redis set key",
+                        },
+                        member: {
+                            oneOf: [
+                                { type: "string" },
+                                { type: "array", items: { type: "string" } }
+                            ],
+                            description: "Member or array of members to remove from the set",
+                        },
+                    },
+                    required: ["key", "member"],
+                },
+            },
+            {
+                name: "scard",
+                description: "Get the number of members in a set",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        key: {
+                            type: "string",
+                            description: "Redis set key",
+                        },
+                    },
+                    required: ["key"],
                 },
             },
         ],
@@ -963,9 +1076,93 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     },
                 ],
             };
+        }// 实现 Set 相关命令
+        else if (name === "sadd") {
+            const { key, member } = SAddArgumentsSchema.parse(args);
+            let result;
+            
+            if (Array.isArray(member)) {
+                result = await redisClient.sAdd(key, member);
+            } else {
+                result = await redisClient.sAdd(key, member);
+            }
+            
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `成功添加到集合，新增的成员数: ${result}`,
+                    },
+                ],
+            };
+        } else if (name === "smembers") {
+            const { key } = SMembersArgumentsSchema.parse(args);
+            const members = await redisClient.sMembers(key);
+            
+            if (members.length === 0) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `集合为空或不存在: ${key}`,
+                        },
+                    ],
+                };
+            }
+            
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: members.join('\n'),
+                    },
+                ],
+            };
+        } else if (name === "sismember") {
+            const { key, member } = SIsMemberArgumentsSchema.parse(args);
+            const isMember = await redisClient.sIsMember(key, member);
+            
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: isMember ? `成员 "${member}" 存在于集合中` : `成员 "${member}" 不存在于集合中`,
+                    },
+                ],
+            };
+        } else if (name === "srem") {
+            const { key, member } = SRemArgumentsSchema.parse(args);
+            let result;
+            
+            if (Array.isArray(member)) {
+                result = await redisClient.sRem(key, member);
+            } else {
+                result = await redisClient.sRem(key, member);
+            }
+            
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `从集合中移除了 ${result} 个成员: ${key}`,
+                    },
+                ],
+            };
+        } else if (name === "scard") {
+            const { key } = SCardArgumentsSchema.parse(args);
+            const count = await redisClient.sCard(key);
+            
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `集合中的成员数量: ${count}`,
+                    },
+                ],
+            };
         } else {
             throw new Error(`Unknown tool: ${name}`);
-        }
+        } 
     } catch (error) {
         if (error instanceof z.ZodError) {
             throw new Error(
