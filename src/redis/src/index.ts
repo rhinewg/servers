@@ -98,6 +98,35 @@ const LRangeArgumentsSchema = z.object({
     stop: z.number(),
 });
 
+// 添加 ZSet 相关的 Schema 定义
+const ZAddArgumentsSchema = z.object({
+    key: z.string(),
+    score: z.number(),
+    member: z.string(),
+});
+
+const ZRangeArgumentsSchema = z.object({
+    key: z.string(),
+    min: z.number(),
+    max: z.number(),
+    withScores: z.boolean().optional(),
+});
+
+const ZRemArgumentsSchema = z.object({
+    key: z.string(),
+    member: z.string().or(z.array(z.string())),
+});
+
+const ZScoreArgumentsSchema = z.object({
+    key: z.string(),
+    member: z.string(),
+});
+
+const ZRankArgumentsSchema = z.object({
+    key: z.string(),
+    member: z.string(),
+});
+
 // Create server instance
 const server = new Server(
     {
@@ -359,6 +388,70 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                         },
                     },
                     required: ["key", "start", "stop"],
+                },
+            },
+            // 添加 ZSet 相关工具定义
+            {
+                name: "zadd",
+                description: "Add a member with a score to a sorted set",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        key: z.string(),
+                        score: z.number(),
+                        member: z.string(),
+                    },
+                    required: ["key", "score", "member"],
+                },
+            },
+            {
+                name: "zrange",
+                description: "Return a range of members in a sorted set by index",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        key: z.string(),
+                        min: z.number(),
+                        max: z.number(),
+                        withScores: z.boolean().optional(),
+                    },
+                    required: ["key", "min", "max"],
+                },
+            },
+            {
+                name: "zrem",
+                description: "Remove one or more members from a sorted set",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        key: z.string(),
+                        member: z.string().or(z.array(z.string())),
+                    },
+                    required: ["key", "member"],
+                },
+            },
+            {
+                name: "zscore",
+                description: "Get the score of a member in a sorted set",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        key: z.string(),
+                        member: z.string(),
+                    },
+                    required: ["key", "member"],
+                },
+            },
+            {
+                name: "zrank",
+                description: "Get the rank of a member in a sorted set (0-based)",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        key: z.string(),
+                        member: z.string(),
+                    },
+                    required: ["key", "member"],
                 },
             },
         ],
@@ -651,6 +744,135 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     {
                         type: "text",
                         text: result.join('\n'),
+                    },
+                ],
+            };
+        } 
+        // 实现 ZSet 相关命令
+        else if (name === "zadd") {
+            const { key, score, member } = ZAddArgumentsSchema.parse(args);
+            const result = await redisClient.zAdd(key, [{ score, value: member }]);
+
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `成功添加到有序集合，影响的成员数: ${result}`,
+                    },
+                ],
+            };
+        } else if (name === "zrange") {
+            const { key, min, max, withScores } = ZRangeArgumentsSchema.parse(args);
+            let result;
+            
+            if (withScores) {
+                result = await redisClient.zRangeWithScores(key, min, max);
+                
+                if (result.length === 0) {
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: `指定范围内没有成员或有序集合不存在: ${key}`,
+                            },
+                        ],
+                    };
+                }
+                
+                const formattedResult = result.map(item => `${item.value}: ${item.score}`).join('\n');
+                
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: formattedResult,
+                        },
+                    ],
+                };
+            } else {
+                result = await redisClient.zRange(key, min, max);
+                
+                if (result.length === 0) {
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: `指定范围内没有成员或有序集合不存在: ${key}`,
+                            },
+                        ],
+                    };
+                }
+                
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: result.join('\n'),
+                        },
+                    ],
+                };
+            }
+        } else if (name === "zrem") {
+            const { key, member } = ZRemArgumentsSchema.parse(args);
+            let result;
+            
+            if (Array.isArray(member)) {
+                result = await redisClient.zRem(key, member);
+            } else {
+                result = await redisClient.zRem(key, member);
+            }
+            
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `从有序集合中移除了 ${result} 个成员: ${key}`,
+                    },
+                ],
+            };
+        } else if (name === "zscore") {
+            const { key, member } = ZScoreArgumentsSchema.parse(args);
+            const result = await redisClient.zScore(key, member);
+            
+            if (result === null) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `成员在有序集合中不存在: ${key}`,
+                        },
+                    ],
+                };
+            }
+            
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `分数: ${result}`,
+                    },
+                ],
+            };
+        } else if (name === "zrank") {
+            const { key, member } = ZRankArgumentsSchema.parse(args);
+            const result = await redisClient.zRank(key, member);
+            
+            if (result === null) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `成员在有序集合中不存在: ${key}`,
+                        },
+                    ],
+                };
+            }
+            
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `排名: ${result}`,
                     },
                 ],
             };
