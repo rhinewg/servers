@@ -48,6 +48,31 @@ const ListArgumentsSchema = z.object({
     pattern: z.string().default("*"),
 });
 
+// 新增的 Schema 定义
+const HSetArgumentsSchema = z.object({
+    key: z.string(),
+    field: z.string(),
+    value: z.string(),
+});
+
+const HGetArgumentsSchema = z.object({
+    key: z.string(),
+    field: z.string(),
+});
+
+const HGetAllArgumentsSchema = z.object({
+    key: z.string(),
+});
+
+const IncrArgumentsSchema = z.object({
+    key: z.string(),
+});
+
+const ExpireArgumentsSchema = z.object({
+    key: z.string(),
+    seconds: z.number(),
+});
+
 // Create server instance
 const server = new Server(
     {
@@ -129,6 +154,93 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                             description: "Pattern to match keys (default: *)",
                         },
                     },
+                },
+            },
+            // 新增的工具定义
+            {
+                name: "hset",
+                description: "Set field in a hash stored at key to value",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        key: {
+                            type: "string",
+                            description: "Redis hash key",
+                        },
+                        field: {
+                            type: "string",
+                            description: "Hash field name",
+                        },
+                        value: {
+                            type: "string",
+                            description: "Value to store",
+                        },
+                    },
+                    required: ["key", "field", "value"],
+                },
+            },
+            {
+                name: "hget",
+                description: "Get the value of a hash field stored at key",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        key: {
+                            type: "string",
+                            description: "Redis hash key",
+                        },
+                        field: {
+                            type: "string",
+                            description: "Hash field name to retrieve",
+                        },
+                    },
+                    required: ["key", "field"],
+                },
+            },
+            {
+                name: "hgetall",
+                description: "Get all fields and values in a hash",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        key: {
+                            type: "string",
+                            description: "Redis hash key",
+                        },
+                    },
+                    required: ["key"],
+                },
+            },
+            {
+                name: "incr",
+                description: "Increment the integer value of a key by one",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        key: {
+                            type: "string",
+                            description: "Redis key to increment",
+                        },
+                    },
+                    required: ["key"],
+                },
+            },
+            {
+                name: "expire",
+                description: "Set a key's time to live in seconds",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        key: {
+                            type: "string",
+                            description: "Redis key",
+                        },
+                        seconds: {
+                            type: "number",
+                            description: "Expiration time in seconds",
+                        },
+                    },
+                    required: ["key", "seconds"],
                 },
             },
         ],
@@ -218,6 +330,105 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     },
                 ],
             };
+        } 
+        // 新增的工具处理逻辑
+        else if (name === "hset") {
+            const { key, field, value } = HSetArgumentsSchema.parse(args);
+            await redisClient.hSet(key, field, value);
+            
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Successfully set hash field ${field} in key: ${key}`,
+                    },
+                ],
+            };
+        } else if (name === "hget") {
+            const { key, field } = HGetArgumentsSchema.parse(args);
+            const value = await redisClient.hGet(key, field);
+
+            if (value === null) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `Field ${field} not found in hash key: ${key}`,
+                        },
+                    ],
+                };
+            }
+
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `${value}`,
+                    },
+                ],
+            };
+        } else if (name === "hgetall") {
+            const { key } = HGetAllArgumentsSchema.parse(args);
+            const hashData = await redisClient.hGetAll(key);
+
+            if (Object.keys(hashData).length === 0) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `Hash key not found or empty: ${key}`,
+                        },
+                    ],
+                };
+            }
+
+            const formattedData = Object.entries(hashData)
+                .map(([field, value]) => `${field}: ${value}`)
+                .join('\n');
+
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: formattedData,
+                    },
+                ],
+            };
+        } else if (name === "incr") {
+            const { key } = IncrArgumentsSchema.parse(args);
+            const newValue = await redisClient.incr(key);
+
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Incremented key: ${key}, new value: ${newValue}`,
+                    },
+                ],
+            };
+        } else if (name === "expire") {
+            const { key, seconds } = ExpireArgumentsSchema.parse(args);
+            const result = await redisClient.expire(key, seconds);
+
+            if (result) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `Successfully set expiration of ${seconds} seconds for key: ${key}`,
+                        },
+                    ],
+                };
+            } else {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `Failed to set expiration: key ${key} does not exist`,
+                        },
+                    ],
+                };
+            }
         } else {
             throw new Error(`Unknown tool: ${name}`);
         }
