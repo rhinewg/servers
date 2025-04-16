@@ -127,6 +127,24 @@ const ZRankArgumentsSchema = z.object({
     member: z.string(),
 });
 
+// 添加发布订阅相关的 Schema 定义
+const PublishArgumentsSchema = z.object({
+    channel: z.string(),
+    message: z.string(),
+});
+
+const SubscribeArgumentsSchema = z.object({
+    channel: z.string().or(z.array(z.string())),
+});
+
+const UnsubscribeArgumentsSchema = z.object({
+    channel: z.string().or(z.array(z.string())).optional(),
+});
+
+const PubSubChannelsArgumentsSchema = z.object({
+    pattern: z.string().optional(),
+});
+
 // Create server instance
 const server = new Server(
     {
@@ -452,6 +470,38 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                         member: z.string(),
                     },
                     required: ["key", "member"],
+                },
+            },
+            // 添加发布订阅相关工具定义
+            {
+                name: "publish",
+                description: "Publish a message to a channel",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        channel: {
+                            type: "string",
+                            description: "Channel to publish to",
+                        },
+                        message: {
+                            type: "string",
+                            description: "Message to publish",
+                        },
+                    },
+                    required: ["channel", "message"],
+                },
+            },
+            {
+                name: "pubsub_channels",
+                description: "List active channels (with at least one subscriber)",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        pattern: {
+                            type: "string",
+                            description: "Pattern to filter channels (optional)",
+                        },
+                    },
                 },
             },
         ],
@@ -873,6 +923,43 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     {
                         type: "text",
                         text: `排名: ${result}`,
+                    },
+                ],
+            };
+        } 
+        // 实现发布订阅相关命令
+        else if (name === "publish") {
+            const { channel, message } = PublishArgumentsSchema.parse(args);
+            const subscriberCount = await redisClient.publish(channel, message);
+            
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `消息已发布到频道 ${channel}，有 ${subscriberCount} 个订阅者接收到消息`,
+                    },
+                ],
+            };
+        } else if (name === "pubsub_channels") {
+            const { pattern } = PubSubChannelsArgumentsSchema.parse(args);
+            const channels = await redisClient.pubSubChannels(pattern || "*");
+            
+            if (channels.length === 0) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `没有找到活跃的频道${pattern ? `匹配模式 ${pattern}` : ''}`,
+                        },
+                    ],
+                };
+            }
+            
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `活跃的频道:\n${channels.join('\n')}`,
                     },
                 ],
             };
